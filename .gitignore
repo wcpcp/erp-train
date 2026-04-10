@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .DS_Store
 *.egg-info/
+.cache/
 output/
 data/
 !.gitkeep

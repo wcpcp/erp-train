@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONPATH="${ROOT_DIR}/src:${PYTHONPATH:-}"
+source "${ROOT_DIR}/scripts/common_dataset.sh"
 
 TRAIN_DATA="${TRAIN_DATA:-${ROOT_DIR}/examples/data/pano_erp_sft_sample.jsonl}"
 VAL_DATA="${VAL_DATA:-}"
@@ -29,6 +30,11 @@ ERP_MODULES_TO_SAVE_CSV="$(IFS=,; echo "${ERP_MODULES_TO_SAVE[*]}")"
 
 NPROC_PER_NODE="${NPROC_PER_NODE:-2}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
+
+TRAIN_DATA="$(normalize_dataset_for_swift "${TRAIN_DATA}" train)"
+if [[ -n "${VAL_DATA}" ]]; then
+  VAL_DATA="$(normalize_dataset_for_swift "${VAL_DATA}" val)"
+fi
 
 DATA_ARGS=(--dataset "${TRAIN_DATA}")
 if [[ -n "${VAL_DATA}" ]]; then

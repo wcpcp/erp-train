@@ -384,6 +384,14 @@ PANO_ERP_STAGE=merger python scripts/smoke_test_models.py --only qwen3-vl --max-
 
 如果你已经有 `messages + images` 这种多模态数据，**推荐直接训练，不需要额外在外面写转换代码**。
 
+训练脚本现在默认也会做一层**自动标准化**：
+
+- 标准 `messages + images` 数据会原样兼容
+- 简单 `question/answer/image` 数据会自动转成标准多模态格式
+- benchmark 风格的 `question + options + answer + image_path` 验证集也会自动兼容
+
+也就是说，你把原始 `TRAIN_DATA` / `VAL_DATA` 路径直接传给训练脚本即可，脚本会先在 `.cache/normalized_datasets/` 下生成可供 `ms-swift` 使用的标准 JSONL。
+
 ### 7.0 你当前这种数据可以直接训练
 
 像下面这种数据：
@@ -604,6 +612,63 @@ python -m pano_qwen_erp.data.prepare_sft \
 样例数据：
 
 - `examples/data/pano_erp_sft_sample.jsonl`
+
+### 7.6 benchmark 验证集格式
+
+下面这种验证集格式现在也支持：
+
+```json
+{
+  "item_id": "xxx",
+  "scene_id": "xxx",
+  "task_id": "absolute_direction_mc",
+  "answer_format": "4_way_multiple_choice",
+  "image_path": "/abs/path/pano.jpg",
+  "question": "Using the current ERP view as the reference frame (image center = front), which absolute panorama sector best matches person walking in dark clothing?",
+  "answer": "B",
+  "answer_text": "back-right",
+  "options": [
+    {"key": "A", "text": "back-left"},
+    {"key": "B", "text": "back-right"},
+    {"key": "C", "text": "front-right"},
+    {"key": "D", "text": "front-left"}
+  ],
+  "metadata": {
+    "yaw_deg": 135.0,
+    "sector": "back-right"
+  }
+}
+```
+
+它会自动被标准化成：
+
+- `user`: `<image>` + 原始问题 + 选项列表
+- `assistant`: `answer`，例如 `"B"`
+- `images`: 从 `image_path` 或 `image_paths` 自动收集
+
+同时原始字段会被保留，例如：
+
+- `item_id`
+- `scene_id`
+- `task_id`
+- `answer`
+- `answer_text`
+- `options`
+- `metadata`
+
+这样后续做 benchmark 打分时，可以直接按保留下来的 `answer` 对模型预测做准确率统计。
+
+如果你只是想在训练过程中把它当作验证集使用，可以直接这样：
+
+```bash
+TRAIN_DATA=/abs/path/train.jsonl \
+VAL_DATA=/workspace/data_dir/data_user/wcp/world-model/generation_pano_base/erp-benchmark-workspace/data/final/selection_out_with_oursindoor/selected.jsonl \
+PANO_ERP_STAGE=output \
+PANO_ERP_TARGET=pooler \
+bash scripts/train_qwen3_vl_4b_lora.sh
+```
+
+训练脚本会自动把这个 `selected.jsonl` 转成 `ms-swift` 可读取的验证集格式，不需要你手工改文件。
 
 ## 8. 训练
 
