@@ -14,7 +14,7 @@ if SRC_ROOT not in sys.path:
 
 from pano_qwen_erp.vision_adapter import ERPSphericalPosAdapter
 
-from swift.model import Model, ModelGroup, ModelMeta, ModelLoader, register_model
+from swift.model import Model, ModelGroup, ModelMeta, register_model
 from swift.model.model_arch import ModelArch
 from swift.model.patcher import patch_get_input_embeddings
 from swift.model.models.qwen import Qwen2_5VLLoader, Qwen3VLLoader, Qwen3_5Loader
@@ -253,7 +253,7 @@ class PanoramaQwen3VLLoader(Qwen3VLLoader):
         from transformers import Qwen3VLForConditionalGeneration
 
         self.auto_model_cls = self.auto_model_cls or Qwen3VLForConditionalGeneration
-        model = ModelLoader.get_model(self, model_dir, config, processor, model_kwargs)
+        model = super().get_model(model_dir, config, processor, model_kwargs)
         _patch_visual_input_embeddings(model)
         _attach_erp_adapter(model)
         return model
@@ -264,7 +264,7 @@ class PanoramaQwen25VLLoader(Qwen2_5VLLoader):
         from transformers import Qwen2_5_VLForConditionalGeneration
 
         self.auto_model_cls = self.auto_model_cls or Qwen2_5_VLForConditionalGeneration
-        model = ModelLoader.get_model(self, model_dir, config, processor, model_kwargs)
+        model = super().get_model(model_dir, config, processor, model_kwargs)
         _patch_visual_input_embeddings(model)
         _attach_erp_adapter(model)
         return model
@@ -275,7 +275,7 @@ class PanoramaQwen35Loader(Qwen3_5Loader):
         from transformers import Qwen3_5ForConditionalGeneration
 
         self.auto_model_cls = self.auto_model_cls or Qwen3_5ForConditionalGeneration
-        model = ModelLoader.get_model(self, model_dir, config, processor, model_kwargs)
+        model = super().get_model(model_dir, config, processor, model_kwargs)
         _patch_visual_input_embeddings(model)
         _attach_erp_adapter(model)
         return model
@@ -289,8 +289,12 @@ register_model(
                 [
                     Model("Qwen/Qwen2.5-VL-3B-Instruct", "Qwen/Qwen2.5-VL-3B-Instruct"),
                     Model("Qwen/Qwen2.5-VL-7B-Instruct", "Qwen/Qwen2.5-VL-7B-Instruct"),
+                    Model("Qwen/Qwen2.5-VL-32B-Instruct", "Qwen/Qwen2.5-VL-32B-Instruct"),
+                    Model("Qwen/Qwen2.5-VL-72B-Instruct", "Qwen/Qwen2.5-VL-72B-Instruct"),
                     Model("Qwen/Qwen2.5-VL-3B-Instruct-AWQ", "Qwen/Qwen2.5-VL-3B-Instruct-AWQ"),
                     Model("Qwen/Qwen2.5-VL-7B-Instruct-AWQ", "Qwen/Qwen2.5-VL-7B-Instruct-AWQ"),
+                    Model("Qwen/Qwen2.5-VL-32B-Instruct-AWQ", "Qwen/Qwen2.5-VL-32B-Instruct-AWQ"),
+                    Model("Qwen/Qwen2.5-VL-72B-Instruct-AWQ", "Qwen/Qwen2.5-VL-72B-Instruct-AWQ"),
                 ],
                 TemplateType.qwen2_5_vl,
             ),
@@ -311,10 +315,21 @@ register_model(
             ModelGroup(
                 [
                     Model("Qwen/Qwen3-VL-2B-Instruct", "Qwen/Qwen3-VL-2B-Instruct"),
+                    Model("Qwen/Qwen3-VL-2B-Thinking", "Qwen/Qwen3-VL-2B-Thinking"),
+                    Model("Qwen/Qwen3-VL-2B-Instruct-FP8", "Qwen/Qwen3-VL-2B-Instruct-FP8"),
+                    Model("Qwen/Qwen3-VL-2B-Thinking-FP8", "Qwen/Qwen3-VL-2B-Thinking-FP8"),
                     Model("Qwen/Qwen3-VL-4B-Instruct", "Qwen/Qwen3-VL-4B-Instruct"),
                     Model("Qwen/Qwen3-VL-8B-Instruct", "Qwen/Qwen3-VL-8B-Instruct"),
                     Model("Qwen/Qwen3-VL-4B-Thinking", "Qwen/Qwen3-VL-4B-Thinking"),
                     Model("Qwen/Qwen3-VL-8B-Thinking", "Qwen/Qwen3-VL-8B-Thinking"),
+                    Model("Qwen/Qwen3-VL-4B-Instruct-FP8", "Qwen/Qwen3-VL-4B-Instruct-FP8"),
+                    Model("Qwen/Qwen3-VL-4B-Thinking-FP8", "Qwen/Qwen3-VL-4B-Thinking-FP8"),
+                    Model("Qwen/Qwen3-VL-8B-Instruct-FP8", "Qwen/Qwen3-VL-8B-Instruct-FP8"),
+                    Model("Qwen/Qwen3-VL-8B-Thinking-FP8", "Qwen/Qwen3-VL-8B-Thinking-FP8"),
+                    Model("Qwen/Qwen3-VL-32B-Instruct", "Qwen/Qwen3-VL-32B-Instruct"),
+                    Model("Qwen/Qwen3-VL-32B-Thinking", "Qwen/Qwen3-VL-32B-Thinking"),
+                    Model("Qwen/Qwen3-VL-32B-Instruct-FP8", "Qwen/Qwen3-VL-32B-Instruct-FP8"),
+                    Model("Qwen/Qwen3-VL-32B-Thinking-FP8", "Qwen/Qwen3-VL-32B-Thinking-FP8"),
                 ],
                 TemplateType.qwen3_vl,
             ),
@@ -334,8 +349,14 @@ register_model(
         [
             ModelGroup(
                 [
+                    Model("Qwen/Qwen3.5-0.8B", "Qwen/Qwen3.5-0.8B"),
+                    Model("Qwen/Qwen3.5-2B", "Qwen/Qwen3.5-2B"),
                     Model("Qwen/Qwen3.5-4B", "Qwen/Qwen3.5-4B"),
                     Model("Qwen/Qwen3.5-9B", "Qwen/Qwen3.5-9B"),
+                    Model("Qwen/Qwen3.5-27B", "Qwen/Qwen3.5-27B"),
+                    Model("Qwen/Qwen3.5-27B-FP8", "Qwen/Qwen3.5-27B-FP8"),
+                    Model("Qwen/Qwen3.5-0.8B-Base", "Qwen/Qwen3.5-0.8B-Base"),
+                    Model("Qwen/Qwen3.5-2B-Base", "Qwen/Qwen3.5-2B-Base"),
                     Model("Qwen/Qwen3.5-4B-Base", "Qwen/Qwen3.5-4B-Base"),
                     Model("Qwen/Qwen3.5-9B-Base", "Qwen/Qwen3.5-9B-Base"),
                 ],
@@ -346,6 +367,6 @@ register_model(
         model_arch=ModelArch.qwen2_vl,
         template=TemplateType.qwen3_5,
         architectures=["Qwen3_5ForConditionalGeneration"],
-        requires=["transformers>=5.0.0.dev", "qwen_vl_utils>=0.0.14", "decord"],
+        requires=["transformers>=5.2.0", "qwen_vl_utils>=0.0.14", "decord"],
         tags=["vision", "video", "erp"],
     ))

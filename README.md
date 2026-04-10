@@ -7,7 +7,7 @@
 - 结构实验：把 ERP 球面位置编码接到不同层位
 - 训练实验：做球面旋转一致性训练与相关消融
 
-当前项目基于官方 `ms-swift`，本地固定在 `third_party/ms-swift`，版本为 `v4.0.3`。
+当前项目基于官方 `ms-swift`，本地固定在 `third_party/ms-swift`，版本为 `v4.1.0`。
 
 ## 1. 当前核心思路
 
@@ -51,11 +51,18 @@ PANO_ERP_TARGET=pooler
 
 - `Qwen/Qwen2.5-VL-3B-Instruct`
 - `Qwen/Qwen2.5-VL-7B-Instruct`
+- `Qwen/Qwen2.5-VL-32B-Instruct`
+- `Qwen/Qwen2.5-VL-72B-Instruct`
 - `Qwen/Qwen3-VL-2B-Instruct`
 - `Qwen/Qwen3-VL-4B-Instruct`
 - `Qwen/Qwen3-VL-8B-Instruct`
+- `Qwen/Qwen3-VL-32B-Instruct`
 - `Qwen/Qwen3.5-4B`
 - `Qwen/Qwen3.5-9B`
+
+此外也已经同步注册了上游 `v4.1.0` 新增的一批 `Thinking / FP8 / Base` 变体，具体可直接查看：
+
+- `src/pano_qwen_erp/register.py`
 
 推荐优先顺序：
 
@@ -304,18 +311,31 @@ bash scripts/bootstrap.sh
 source .venv/bin/activate
 ```
 
-如果你要用 `Qwen3.5`，当前还需要升级 `transformers`：
+注意：
+
+- `Qwen3.5` 推荐使用 `Python >= 3.10`
+- `scripts/bootstrap.sh` 会优先寻找 `python3.12 / 3.11 / 3.10`
+- 如果系统默认 `python3` 仍是 `3.9`，脚本会直接报错并提示你指定 `PYTHON_BIN`
+
+如果你需要手动指定解释器：
 
 ```bash
-source .venv/bin/activate
-python -m pip install --upgrade 'git+https://github.com/huggingface/transformers.git'
+PYTHON_BIN=python3.11 bash scripts/bootstrap.sh
 ```
 
-必要时补：
+`bootstrap.sh` 现在会额外安装一套和 `Qwen3.5 + ms-swift v4.1.0` 更匹配的依赖：
 
 ```bash
-pip install decord
+transformers==5.2.*
+qwen_vl_utils>=0.0.14
+decord
 ```
+
+其中：
+
+- `decord` 在部分本地 `macOS` 环境里可能装不上，这是正常的
+- 如果你本地只做图片训练或只做代码验证，可以先不依赖它
+- 服务器端正式训练时，建议使用 `Linux + Python >= 3.10`
 
 ## 6. 本地验证
 

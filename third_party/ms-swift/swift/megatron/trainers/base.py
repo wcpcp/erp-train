@@ -10,6 +10,7 @@ import torch.nn
 from abc import ABC, abstractmethod
 from contextlib import contextmanager, nullcontext
 from functools import partial
+from mcore_bridge import LoraParallelLinear
 from megatron.core import mpu
 from megatron.core.distributed import DistributedDataParallel as DDP
 from megatron.core.distributed import finalize_model_grads
@@ -26,8 +27,7 @@ from typing import Callable, Dict, List, Optional
 from swift.dataset import RowPreprocessor
 from swift.megatron.callbacks import megatron_callbacks_map
 from swift.megatron.model import get_mcore_model
-from swift.megatron.tuners import LoraParallelLinear
-from swift.megatron.utils import (copy_original_module_weight, disable_forward_pre_hook, enable_forward_pre_hook,
+from swift.megatron.utils import (apply_router_replay_patch, disable_forward_pre_hook, enable_forward_pre_hook,
                                   get_optimizer_param_scheduler, get_padding_to, init_persistent_async_worker,
                                   initialize_tp_communicators, load_mcore_checkpoint,
                                   logical_and_across_model_parallel_group, maybe_finalize_async_save,
@@ -44,8 +44,13 @@ from .utils import (TrainerState, build_streaming_dataloader, get_batch_on_this_
 
 try:
     from megatron.core.optimizer import param_group_identifier_keys
+    from megatron.core.transformer.moe.router_replay import RouterReplay, RouterReplayAction
 except ImportError:
     param_group_identifier_keys = None
+    RouterReplay = None
+    RouterReplayAction = None
+
+mcore_016 = version.parse(megatron.core.__version__) >= version.parse('0.16.0rc0')
 
 logger = get_logger()
 
@@ -53,10 +58,14 @@ logger = get_logger()
 class BaseMegatronTrainer(ABC):
 
     def __init__(self, args, template: Template):
+        # validate mcore version and patch routing_replay
+        self.enable_routing_replay = args.router_replay_mode != 'disabled'
+        if self.enable_routing_replay:
+            apply_router_replay_patch()
+
         self.args = args
         self.template = template
         self.prepare_model()
-        self.config = self.unwrapped_models[0].config
         self.optimizer, self.opt_param_scheduler = self.get_optimizer_and_scheduler()
         self.data_collator = self._get_data_collator()
 
@@ -65,9 +74,6 @@ class BaseMegatronTrainer(ABC):
         if initialize_embedding:
             for m in self.unwrapped_models:
                 self._initialize_embedding(m)
-        if args.tuner_type != 'full' and args.modules_to_save:
-            for m in self.unwrapped_models:
-                copy_original_module_weight(m)
         self._load_checkpoint()
 
         self.eval_metrics = None
@@ -175,9 +181,9 @@ class BaseMegatronTrainer(ABC):
 
     def prepare_model(self):
         args = self.args
-        self.wrapped_models = []
         self.unwrapped_models = get_mcore_model(args, self.template.config)
-        self.bridge = args.megatron_model_meta.bridge_cls(args)
+        self.config = self.unwrapped_models[0].config
+        self.bridge = self.config.bridge
         self.peft_models = self._prepare_peft_model(self.unwrapped_models)
         self.wrapped_models = wrap_model(args, self.unwrapped_models)
 
@@ -188,22 +194,51 @@ class BaseMegatronTrainer(ABC):
         peft_models = [prepare_mcore_model(args, model) for model in models]
         if args.tuner_type == 'lora' and args.adapters and args.mcore_adapter is None:
             assert len(args.adapters) == 1, 'Currently only support one adapter.'
-            self.bridge.load_weights(models, args.adapters[0], is_peft_format=True, adapter_name='default')
+            self.bridge.load_weights(models, args.adapters[0], peft_format=True, adapter_name='default')
         return peft_models
 
     def get_optimizer_and_scheduler(self):
         args = self.args
-        kwargs = {}
-        for f in dataclasses.fields(OptimizerConfig):
-            if hasattr(args, f.name) and f.name != 'loss_scale':
-                kwargs[f.name] = getattr(args, f.name)
-        config = OptimizerConfig(**kwargs)
+        if mcore_016:
+            from megatron.core.optimizer import AdamOptimizerConfig, SGDOptimizerConfig
+            if args.optimizer == 'adam' or 'muon' in args.optimizer:
+                # TODO(deyuf): Muon needs both adam + muon but get() only receive one config
+                # So for now we keep using adam config that's back compat with old way
+                config_cls = AdamOptimizerConfig
+            elif args.optimizer == 'sgd':
+                config_cls = SGDOptimizerConfig
+            else:
+                raise ValueError(f'Invalid optimizer type: {args.optimizer}')
+        else:
+            config_cls = OptimizerConfig
+
+        kwargs = {
+            f.name: getattr(args, f.name)
+            for f in dataclasses.fields(config_cls) if hasattr(args, f.name) and f.name != 'loss_scale'
+        }
+        config = config_cls(**kwargs)
+
         if args.apply_wd_to_qk_layernorm or self.args.vit_lr is not None or self.args.aligner_lr is not None:
             param_groups_context = self._patch_get_param_groups()
         else:
             param_groups_context = nullcontext()
         with param_groups_context:
-            optimizer = get_megatron_optimizer(config, self.wrapped_models)
+
+            if 'muon' not in config.optimizer:
+                # If the user is asking for a non-zero embedding init std, skip weight decay for embeddings
+                # to avoid embeddings from shrinking to zero as recommended in https://arxiv.org/abs/2312.16903
+                # default_skip_embedding_weight_decay=args.embedding_init_method_std is not None,
+                optimizer = get_megatron_optimizer(
+                    config,
+                    self.wrapped_models,
+                )
+            else:
+                from megatron.core.optimizer.muon import get_megatron_muon_optimizer
+                optimizer = get_megatron_muon_optimizer(
+                    config,
+                    self.wrapped_models,
+                    layer_wise_distributed_optimizer='dist' in config.optimizer,
+                )
         opt_param_scheduler = get_optimizer_param_scheduler(args, optimizer)
         return optimizer, opt_param_scheduler
 
@@ -415,7 +450,6 @@ class BaseMegatronTrainer(ABC):
     @contextmanager
     def _patch_get_param_groups(self):
         from megatron.core import optimizer
-        mcore_016 = version.parse(megatron.core.__version__) >= version.parse('0.16.0rc0')
         _get_param_groups = optimizer._get_param_groups
         if mcore_016:
             optimizer._get_param_groups = self._get_param_groups_mcore_016
@@ -431,7 +465,7 @@ class BaseMegatronTrainer(ABC):
         ckpt_dir = None
         if args.tuner_type == 'full':
             ckpt_dir = args.model
-        elif args.tuner_type == 'lora':
+        else:
             ckpt_dir = args.adapters[0] if args.adapters else args.model
         if ckpt_dir is None:
             return 0
@@ -462,7 +496,7 @@ class BaseMegatronTrainer(ABC):
             if self.args.vit_gradient_checkpointing:
                 dynamic_gradient_checkpointing(module, False)
                 try:
-                    module.gradient_checkpointing_enable(**(self.args.gradient_checkpointing_kwargs or {}))
+                    module.gradient_checkpointing_enable(**(self.args.vit_gradient_checkpointing_kwargs or {}))
                     module.enable_input_require_grads()
                 except AttributeError:
                     pass
@@ -689,7 +723,7 @@ class BaseMegatronTrainer(ABC):
             self.optimizer,
             self.opt_param_scheduler,
             iteration=iteration,
-            is_peft_format=args.tuner_type == 'lora',
+            peft_format=args.tuner_type == 'lora',
             output_dir=output_dir)
         state.last_model_checkpoint = output_dir
         if state.best_global_step:
@@ -699,7 +733,7 @@ class BaseMegatronTrainer(ABC):
         # safetensors
         if args.save_safetensors:
             # merge-lora does not store lora, lora saving may report an error (Qwen3-VL-Moe)
-            if args.tuner_type == 'lora' and args.merge_lora:
+            if args.tuner_type != 'full' and args.merge_lora:
                 self.merge_lora_adapters()
                 origin_output_dir = output_dir
                 output_dir = f'{output_dir}-merged'
@@ -715,10 +749,11 @@ class BaseMegatronTrainer(ABC):
             self.bridge.save_weights(
                 self.unwrapped_models,
                 output_dir,
-                is_peft_format=save_peft_format,
+                peft_format=save_peft_format,
+                args=args,
                 processor=self.template.processor,
-                hf_config=self.template.config)
-            if args.tuner_type == 'lora' and args.merge_lora:
+            )
+            if args.tuner_type != 'full' and args.merge_lora:
                 self.unmerge_lora_adapters()
 
         if is_master():
@@ -809,6 +844,10 @@ class BaseMegatronTrainer(ABC):
         self.optimizer.zero_grad()
         # TODO: refactor _replace_data_iterator
         data_iterator = self._replace_data_iterator(train_data_iterator)
+
+        if self.enable_routing_replay:
+            RouterReplay.set_global_router_replay_action(RouterReplayAction.REPLAY_FORWARD)
+
         metrics = forward_backward_func(
             forward_step_func=self.forward_step,
             data_iterator=data_iterator,
@@ -824,6 +863,10 @@ class BaseMegatronTrainer(ABC):
         grad_norm = reduce_max_stat_across_model_parallel_group(grad_norm)
         if update_successful:
             self.opt_param_scheduler.step(increment=args.global_batch_size)
+
+        if self.enable_routing_replay:
+            RouterReplay.clear_global_router_replay_action()
+            RouterReplay.clear_global_indices()
 
         return metrics, grad_norm, update_successful
 
