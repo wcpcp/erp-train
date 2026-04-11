@@ -670,6 +670,47 @@ bash scripts/train_qwen3_vl_4b_lora.sh
 
 训练脚本会自动把这个 `selected.jsonl` 转成 `ms-swift` 可读取的验证集格式，不需要你手工改文件。
 
+### 7.7 benchmark 验证集会自动切到多选题评测
+
+如果 `VAL_DATA` 的原始文件里包含：
+
+- `options`
+- `answer`
+
+或者 `answer_format` 里含有 `multiple_choice / choice`，训练脚本会自动把验证模式切成：
+
+- `PANO_EVAL_MODE=mcq`
+
+也就是：
+
+- 用 `predict_with_generate=true`
+- 用自定义指标 `pano_mcq`
+- 按 `answer` 选项键计算准确率
+
+当前会记录三个指标：
+
+- `mc_acc`
+- `parse_rate`
+- `exact_match`
+
+其中：
+
+- `mc_acc`：从生成文本里解析出选项键后，与标准答案对比得到的准确率
+- `parse_rate`：模型输出里成功解析出合法选项键的比例
+- `exact_match`：生成文本与标准答案字符串完全一致的比例
+
+如果你想手动覆盖自动识别，可以设置：
+
+```bash
+PANO_EVAL_MODE=mcq
+```
+
+或者：
+
+```bash
+PANO_EVAL_MODE=default
+```
+
 ## 8. 训练
 
 ### 推荐第一组实验
@@ -684,6 +725,56 @@ OUTPUT_DIR=/abs/path/output/qwen3_vl_4b_erp \
 PANO_ERP_POS_MODE=paper \
 PANO_ERP_STAGE=output \
 PANO_ERP_TARGET=pooler \
+bash scripts/train_qwen3_vl_4b_lora.sh
+```
+
+### 8.1 训练时的验证打分与 checkpoint 保留策略
+
+只要你传了 `VAL_DATA`，训练脚本默认会开启：
+
+- `load_best_model_at_end=true`
+- `create_checkpoint_symlink=true`
+- `save_total_limit=2`
+
+这意味着：
+
+- 会保留一个“验证集表现最好”的 checkpoint
+- 也会保留最后一次保存的 checkpoint
+- 输出目录里会额外有：
+  - `best`
+  - `last`
+
+注意：
+
+- `best` 需要至少完成一次验证之后才会产生
+- 如果训练总步数太短，连一次验证都没有跑到，那么只会稳定得到 `last`
+
+如果验证集是 benchmark 多选题格式，best checkpoint 默认按：
+
+- `metric_for_best_model=mc_acc`
+
+来选。
+
+如果验证集不是 benchmark 多选题格式，则仍然会走 `ms-swift` 默认逻辑，例如：
+
+- 生成式验证时按 `rouge-l`
+- 非生成式验证时按 `loss`
+
+建议：
+
+- 尽量让 `EVAL_STEPS` 和 `SAVE_STEPS` 相同
+- 这样 best checkpoint 的追踪会最稳定
+
+例如：
+
+```bash
+TRAIN_DATA=/abs/path/train.jsonl \
+VAL_DATA=/workspace/data_dir/data_user/wcp/world-model/generation_pano_base/erp-benchmark-workspace/data/final/selection_out_with_oursindoor/selected.jsonl \
+OUTPUT_DIR=/abs/path/output/qwen3_vl_4b_benchmark \
+PANO_ERP_STAGE=output \
+PANO_ERP_TARGET=pooler \
+EVAL_STEPS=200 \
+SAVE_STEPS=200 \
 bash scripts/train_qwen3_vl_4b_lora.sh
 ```
 

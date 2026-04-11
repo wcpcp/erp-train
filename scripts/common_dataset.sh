@@ -13,6 +13,64 @@ _resolve_dataset_python() {
   return 1
 }
 
+resolve_dataset_eval_mode() {
+  local input_path="${1:-}"
+  local requested_mode="${PANO_EVAL_MODE:-auto}"
+  local python_bin
+  python_bin="$(_resolve_dataset_python)"
+
+  if [[ -z "${input_path}" ]]; then
+    echo "none"
+    return 0
+  fi
+
+  if [[ "${requested_mode}" != "auto" ]]; then
+    echo "${requested_mode}"
+    return 0
+  fi
+
+  local input_abs
+  input_abs="$("${python_bin}" - <<'PY' "${input_path}"
+from pathlib import Path
+import sys
+print(Path(sys.argv[1]).expanduser().resolve())
+PY
+)"
+
+  "${python_bin}" - <<'PY' "${input_abs}"
+from pathlib import Path
+import json
+import sys
+
+
+def read_first_record(path: Path):
+    if path.suffix == ".json":
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            data = data.get("records", [data])
+        if isinstance(data, list) and data:
+            return data[0]
+        return {}
+
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                return json.loads(line)
+    return {}
+
+
+record = read_first_record(Path(sys.argv[1]))
+answer_format = str(record.get("answer_format", "")).lower()
+if isinstance(record.get("options"), list) and record.get("answer") is not None:
+    print("mcq")
+elif "multiple_choice" in answer_format or "choice" in answer_format:
+    print("mcq")
+else:
+    print("default")
+PY
+}
+
 normalize_dataset_for_swift() {
   local input_path="${1:-}"
   local split_name="${2:-dataset}"

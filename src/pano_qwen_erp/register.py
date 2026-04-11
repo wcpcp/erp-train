@@ -12,13 +12,18 @@ SRC_ROOT = os.path.dirname(CURRENT_DIR)
 if SRC_ROOT not in sys.path:
     sys.path.insert(0, SRC_ROOT)
 
+from pano_qwen_erp.metrics import PanoramaMCQMetrics
 from pano_qwen_erp.vision_adapter import ERPSphericalPosAdapter
 
+from swift.metrics import eval_metrics_map
 from swift.model import Model, ModelGroup, ModelMeta, register_model
 from swift.model.model_arch import ModelArch
 from swift.model.patcher import patch_get_input_embeddings
 from swift.model.models.qwen import Qwen2_5VLLoader, Qwen3VLLoader, Qwen3_5Loader
 from swift.template import TemplateType
+
+
+eval_metrics_map.setdefault("pano_mcq", PanoramaMCQMetrics)
 
 
 def _env_int(name: str, default: int) -> int:

@@ -24,6 +24,11 @@ export PANO_ERP_TARGET="${PANO_ERP_TARGET:-both}"
 
 NPROC_PER_NODE="${NPROC_PER_NODE:-4}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3}"
+RAW_VAL_DATA="${VAL_DATA}"
+EVAL_MODE="none"
+if [[ -n "${RAW_VAL_DATA}" ]]; then
+  EVAL_MODE="$(resolve_dataset_eval_mode "${RAW_VAL_DATA}")"
+fi
 
 TRAIN_DATA="$(normalize_dataset_for_swift "${TRAIN_DATA}" train)"
 if [[ -n "${VAL_DATA}" ]]; then
@@ -33,6 +38,25 @@ fi
 DATA_ARGS=(--dataset "${TRAIN_DATA}")
 if [[ -n "${VAL_DATA}" ]]; then
   DATA_ARGS+=(--val_dataset "${VAL_DATA}")
+fi
+
+CHECKPOINT_ARGS=(--save_total_limit "${SAVE_TOTAL_LIMIT:-2}")
+EVAL_ARGS=()
+if [[ -n "${RAW_VAL_DATA}" ]]; then
+  CHECKPOINT_ARGS+=(
+    --load_best_model_at_end "${LOAD_BEST_MODEL_AT_END:-true}"
+    --create_checkpoint_symlink "${CREATE_CHECKPOINT_SYMLINK:-true}"
+  )
+  if [[ "${EVAL_MODE}" == "mcq" ]]; then
+    EVAL_ARGS+=(
+      --predict_with_generate "${PREDICT_WITH_GENERATE:-true}"
+      --eval_metric "${EVAL_METRIC:-pano_mcq}"
+      --metric_for_best_model "${METRIC_FOR_BEST_MODEL:-mc_acc}"
+      --greater_is_better "${GREATER_IS_BETTER:-true}"
+      --max_new_tokens "${MAX_NEW_TOKENS:-8}"
+      --do_sample "${DO_SAMPLE:-false}"
+    )
+  fi
 fi
 
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES}" \
@@ -57,9 +81,10 @@ swift sft \
   --gradient_checkpointing true \
   --vit_gradient_checkpointing false \
   --gradient_accumulation_steps "${GRADIENT_ACCUMULATION_STEPS:-8}" \
+  "${EVAL_ARGS[@]}" \
   --eval_steps "${EVAL_STEPS:-200}" \
   --save_steps "${SAVE_STEPS:-200}" \
-  --save_total_limit "${SAVE_TOTAL_LIMIT:-2}" \
+  "${CHECKPOINT_ARGS[@]}" \
   --logging_steps "${LOGGING_STEPS:-10}" \
   --max_length "${MAX_LENGTH:-3072}" \
   --output_dir "${OUTPUT_DIR}" \

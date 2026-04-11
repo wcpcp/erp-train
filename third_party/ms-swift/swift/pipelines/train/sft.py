@@ -206,10 +206,18 @@ class SwiftSft(SwiftPipeline, TunerMixin):
                 last_checkpoint = os.path.join(self.args.output_dir, 'last')
                 best_checkpoint = os.path.join(self.args.output_dir, 'best')
                 if is_write_rank:
-                    os.symlink(state.last_model_checkpoint, last_checkpoint)
-                    os.symlink(state.best_model_checkpoint, best_checkpoint)
-                state.last_model_checkpoint = last_checkpoint
-                state.best_model_checkpoint = best_checkpoint
+                    if state.last_model_checkpoint:
+                        if os.path.lexists(last_checkpoint):
+                            os.unlink(last_checkpoint)
+                        os.symlink(state.last_model_checkpoint, last_checkpoint)
+                    if state.best_model_checkpoint:
+                        if os.path.lexists(best_checkpoint):
+                            os.unlink(best_checkpoint)
+                        os.symlink(state.best_model_checkpoint, best_checkpoint)
+                if state.last_model_checkpoint:
+                    state.last_model_checkpoint = last_checkpoint
+                if state.best_model_checkpoint:
+                    state.best_model_checkpoint = best_checkpoint
         else:
             state.last_model_checkpoint = None
         logger.info_if(f'last_model_checkpoint: {state.last_model_checkpoint}', cond=is_write_rank)
